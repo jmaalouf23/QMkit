@@ -7,7 +7,7 @@ from rdkit import Chem
 import subprocess
 import pandas as pd
 import argparse
-from utils import b2bf
+from utils import b2bf, bf2b
 
 
 def GetSpinMultiplicity(Mol, CheckMolProp = True):
@@ -62,7 +62,7 @@ def mkgauss_input_from_xyz(rn,smiles,filename,solvorgas='gas',solvmethod=None,so
         f.write("%Mem=30GB\n")
         f.write(f"%chk={filename}.chk\n")
         f.write("%NProcShared=32\n")
-        f.write(f"#n {functional}/{basis} Opt Freq\n")
+        f.write(f"#n {functional}/{bf2b(basis)} Opt Freq\n")
         if solvorgas=='solv':
             f.write(f"SCRF=({solvmethod},solvent={solvent})\n\n")
             f.write('solventopt\n\n')
