@@ -7,6 +7,8 @@ from rdkit import Chem
 import subprocess
 import pandas as pd
 import argparse
+from utils import b2bf
+
 
 def GetSpinMultiplicity(Mol, CheckMolProp = True):
     """Get spin multiplicity of a molecule. The spin multiplicity is either
@@ -84,20 +86,14 @@ def mkgauss_input_from_xyz(rn,smiles,filename,solvorgas='gas',solvmethod=None,so
 def main(argv):
     inputfile=''
     outfile='' #For example like: 'reactant.com' but without the .com
-    functional='B3LYP'
-    basis='6-31G(2df,p)' #CHoosing this to be the default basis for the method. It is the one used by the QM9 dataset
-
-    solvorgas='gas'
+    functional=''
+    basis='' #CHoosing this to be the default basis for the method. It is the one used by the QM9 dataset
+    solvorgas=''
     solvationmethod=''
-
-    # try:
-    #   opts, args = getopt.getopt(argv,"i:o:fbgsh")
-    # except getopt.GetoptError:
-    #     print('DFT_Script_gen.py -i <inputfile> -o <outputfile>-f <functional> -g<gasorsolv> -b <basis> -s <solvationmethod>')
-    #     sys.exit(2)
 
     inputfile=argv.i
     outfile=argv.o
+    
     if argv.f is not None:
         functional=args.f
     if argv.b is not None:
@@ -105,33 +101,18 @@ def main(argv):
     if argv.g is not None:
         solvorgas=args.g
     if argv.s is not None:
-        solvationmethod=arg.s
+        solvationmethod=argv.s
     if argv.info is not None:
         print('DFT_Script_gen.py -i <inputfile>  -o <outputfile> -f <functional> -g<gasorsolv> -b <basis> -s <solvationmethod>')
-    # for opt, arg in opts:
-    #     if opt=='-i':
-    #         inputfile=arg
-    #     elif opt=='-o':
-    #         outfile=arg
-    #     elif opt=='-f':
-    #         functional=arg
-    #     elif opt== '-b':
-    #         basis=arg
-    #     elif opt== '-g':
-    #         solvorgas=arg
-    #     elif opt== '-s':
-    #         solvationmethod=arg
-    #     elif opt=='-h':
-    #         print('DFT_Script_gen.py -i <inputfile>  -o <outputfile> -f <functional> -g<gasorsolv> -b <basis> -s <solvationmethod>')
+    
 
-    dir_path =os.path.dirname(os.path.realpath(__file__))
+    orig_dir=os.path.dirname(os.path.abspath(inputfile))
 
     try:
         df=pd.read_csv(f'{inputfile}')
     except:
         df=pd.read_excel(f'{inputfile}')
 
-    orig_dir=os.getcwd()
 
     #Get reagents
 #Get the indices
@@ -144,20 +125,32 @@ def main(argv):
     except:
         pass
 
+    react_type=['reactant','product']
+    react_lists=[reagents,products]
 
     for i,rn in enumerate(index):
-        #Turn rn into a string with padded 0s at the beginning
-        rn_str=str(rn+1)
-        rn_0pad=rn_str.zfill(2) #in this case I have 5 digits total
-        reactantdir=os.path.join(orig_dir,f'{rn_0pad}','reactant',solvorgas,functional,'6-31G2dfp',solvationmethod)
-
-        os.chdir(reactantdir)
-        mkgauss_input_from_xyz(rn_0pad,reagents[i],f'{outfile}',functional=functional, basis=basis,solvorgas=solvorgas,solvmethod=solvationmethod,solvent=solvent[i])
-
-        productdir=os.path.join(orig_dir,f'{rn_0pad}','product',solvorgas,functional,'6-31G2dfp',solvationmethod)
-        os.chdir(productdir)
-        mkgauss_input_from_xyz(rn_0pad,products[i],'product',functional=functional, basis=basis,solvorgas=solvorgas,solvmethod=solvationmethod,solvent=solvent[i])
-
+        for j,rt in enumerate(react_type):
+            #Turn rn into a string with padded 0s at the beginning
+            rn_str=str(rn+1)
+            rn_0pad=rn_str.zfill(2) #in this case I have 5 digits total
+            if solvorgas=='solv':
+                if solvationmethod !='':
+                    reactantdir=os.path.join(orig_dir,f'{rn_0pad}',rt,solvorgas,functional,b2bf(basis),solvationmethod)
+                    os.chdir(reactantdir)
+                    mkgauss_input_from_xyz(rn_0pad,react_lists[j][i],f'{rt}',functional=functional, basis=basis,solvorgas=solvorgas,solvmethod=solvationmethod,solvent=solvent[i])
+                else:
+                    print('solvation method not specified. Examples incude -s CPCM')
+                    return
+   
+            elif solvorgas=='gas':
+                if solvationmethod=='':
+                    reactantdir=os.path.join(orig_dir,f'{rn_0pad}',rt,solvorgas,functional,b2bf(basis))
+                    os.chdir(reactantdir)
+                    mkgauss_input_from_xyz(rn_0pad,react_lists[j][i],f'{rt}',functional=functional, basis=basis,solvorgas=solvorgas,solvmethod=solvationmethod,solvent=None)
+                else:
+                    print('Gas specified but an implicit solvation model was also specified. These are conflicting, please rectify this.')
+                    return
+            
 
     os.chdir(orig_dir)
 
@@ -165,13 +158,12 @@ def main(argv):
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument('-i', type=str, required=True)
-    parser.add_argument('-o', type=str, required=True)
+    parser.add_argument('-o', type=str)
     parser.add_argument('-f', type=str)
     parser.add_argument('-b', type=str)
     parser.add_argument('-g', type=str)
     parser.add_argument('-s', type=str)
     parser.add_argument('--info', type=str)
     args = parser.parse_args()
-    print(args)
     main(args)
     print("Done!")
