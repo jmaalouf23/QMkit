@@ -7,7 +7,7 @@ from rdkit import Chem
 import subprocess
 import pandas as pd
 import argparse
-from utils import b2bf, bf2b
+from DFT_utils import b2bf, bf2b
 
 
 def GetSpinMultiplicity(Mol, CheckMolProp = True):
@@ -42,27 +42,63 @@ def GetSpinMultiplicity(Mol, CheckMolProp = True):
     return int(SpinMultiplicity)
 
 
-def mkgauss_input_from_xyz(rn,smiles,filename,solvorgas='gas',solvmethod=None,solvent=None,functional='B3LYP',basis='6-31++G**'):
-    writepath = os.path.join(os.getcwd(),f'{rn}.xyz')
+def mkgauss_input_from_xyz(rn,smiles,solvorgas='gas',solvmethod=None,solvent=None,functional='B3LYP',basis='6-31++G**',mem='180GB',mult=True,charge=True,pop_analysis=False,single_point=False,chk=False,n_proc_shared=48):
+    
+    """ Make a gaussian input script from an xyz file similar to the format produced by
+    open babel. Ideally takes the output of mk_xyz_from_smiles_string or mk_xyz_from_smi.
 
+    Arguments:
+    rn (object): path to output file including the filename. Do not include the extension, such as .com
+
+
+    Returns:
+    gaussian input file containing functional, basis set, xyz coordinates, etc.
+
+    """
+    
+    writepath = os.path.join(os.getcwd(),f'{rn}.xyz')
+    short_filename=os.path.basename(os.path.normpath(rn))
+    
     mode = 'r' if os.path.exists(writepath) else 'w'
     with open(writepath, mode) as f:
         xyz=f.readlines()
 
-    writepath = os.path.join(os.getcwd(),f'{filename}.com')
-
+    writepath = os.path.join(os.getcwd(),f'{rn}.com')
+    
     mode = 'a' if os.path.exists(writepath) else 'w'
     mol=Chem.MolFromSmiles(smiles)
-    pc=Chem.rdmolops.GetFormalCharge(mol)
+    
+    if charge and isinstance(charge,bool):
+        pc=Chem.rdmolops.GetFormalCharge(mol)
+    else:
+        pc=charge
     #get multiplcity
-    mult=GetSpinMultiplicity(mol)
+    
+    if mult and isinstance(mult,bool):
+        mult=GetSpinMultiplicity(mol)
+        
 
     with open(writepath, mode) as f:
         f.truncate(0)
-        f.write("%Mem=30GB\n")
-        f.write(f"%chk={filename}.chk\n")
-        f.write("%NProcShared=32\n")
-        f.write(f"#n {functional}/{bf2b(basis)} Opt Freq\n")
+        f.write(f"%Mem={mem}\n")
+        if chk:
+            f.write(f"%chk={short_filename}.chk\n")
+            
+        f.write(f"%NProcShared={n_proc_shared}\n")
+        #f.write(f"#p {functional}/{bf2b(basis)} Opt=(calcall,noeigentest,maxcycles=120) Freq\n")
+        
+        
+        if single_point:
+            sp=''
+        else:
+            sp='Opt=(maxcycles=120)' 
+        if pop_analysis:
+            p='Pop=Full iop(3/33=1)'
+        else:
+            p=''
+            
+        f.write(f"#p {functional}/{bf2b(basis)} {p} {sp} Freq\n")
+        
         if solvorgas=='solv':
             f.write(f"SCRF=({solvmethod},solvent={solvent})\n\n")
             f.write('solventopt\n\n')
@@ -78,92 +114,54 @@ def mkgauss_input_from_xyz(rn,smiles,filename,solvorgas='gas',solvmethod=None,so
         f.write('\n')
         f.close()
 
-
-
-
-# Actual executable script
-
-def main(argv):
-    inputfile=''
-    outfile='' #For example like: 'reactant.com' but without the .com
-    functional=''
-    basis='' #CHoosing this to be the default basis for the method. It is the one used by the QM9 dataset
-    solvorgas=''
-    solvationmethod=''
-
-    inputfile=argv.i
-    outfile=argv.o
+def mkgauss_submission_script(path,partition='xeon-p8',job_name='name', time='5-0:00:00',num_cpus=48,mem_per_cpu=4000):
     
-    if argv.f is not None:
-        functional=args.f
-    if argv.b is not None:
-        basis=args.b
-    if argv.g is not None:
-        solvorgas=args.g
-    if argv.s is not None:
-        solvationmethod=argv.s
-    if argv.info is not None:
-        print('DFT_Script_gen.py -i <inputfile>  -o <outputfile> -f <functional> -g<gasorsolv> -b <basis> -s <solvationmethod>')
-    
+    short_filename=os.path.basename(os.path.normpath(path))
+    writepath = os.path.join(os.getcwd(),f'{path}.sh')
+    short_filename=os.path.basename(os.path.normpath(path))
+    mode = 'a' if os.path.exists(writepath) else 'w'
 
-    orig_dir=os.path.dirname(os.path.abspath(inputfile))
+    with open(writepath, mode) as f:
+        f.truncate(0)
+        f.write("#!/bin/bash -l\n")
+        f.write(f"#SBATCH --partition={partition}\n")
+        f.write(f"#SBATCH -J {short_filename}\n")
+        f.write(f"#SBATCH -N 1\n")
+        f.write(f"#SBATCH -c {num_cpus}\n")
+        f.write(f"#SBATCH --time={time}\n")
+        f.write(f"#SBATCH --mem-per-cpu={mem_per_cpu}\n")
+        f.write(f"#SBATCH --exclusive\n\n")
+        
+        f.write(f"export g16root=/home/gridsan/groups/manthiram_lab/gaussian\n\n")
+        f.write(f"export PATH=$g16root/g16/:$g16root/gv:$PATH\n\n")
+        
+        f.write(f"echo \"Gaussian PATH\"\n")
+        f.write(f"which g16\n")
+        f.write(f"input={short_filename}.com\n")
+        
+        f.write(f'echo "============================================================"\n')
+        f.write(f'echo "Job ID : $SLURM_JOB_ID"\n')
+        f.write(f'echo "Job Name : $SLURM_JOB_NAME"\n')
+        f.write(f'echo "Starting on : $(date)"\n')
+        f.write(f'echo "Running on node : $SLURMD_NODENAME"\n')
+        f.write(f'echo "Current directory : $(pwd)"\n')
 
-    try:
-        df=pd.read_csv(f'{inputfile}')
-    except:
-        df=pd.read_excel(f'{inputfile}')
-
-
-    #Get reagents
-#Get the indices
-
-    index=list(df.index.values)
-    reagents=df['Reagent 1 (smiles)'].to_numpy()
-    products=df['Product 1 (smiles)'].to_numpy()
-    try:
-        solvent=df['solvent'].to_numpy()
-    except:
-        pass
-
-    react_type=['reactant','product']
-    react_lists=[reagents,products]
-
-    for i,rn in enumerate(index):
-        for j,rt in enumerate(react_type):
-            #Turn rn into a string with padded 0s at the beginning
-            rn_str=str(rn+1)
-            rn_0pad=rn_str.zfill(2) #in this case I have 5 digits total
-            if solvorgas=='solv':
-                if solvationmethod !='':
-                    reactantdir=os.path.join(orig_dir,f'{rn_0pad}',rt,solvorgas,functional,b2bf(basis),solvationmethod)
-                    os.chdir(reactantdir)
-                    mkgauss_input_from_xyz(rn_0pad,react_lists[j][i],f'{rt}',functional=functional, basis=basis,solvorgas=solvorgas,solvmethod=solvationmethod,solvent=solvent[i])
-                else:
-                    print('solvation method not specified. Examples incude -s CPCM')
-                    return
-   
-            elif solvorgas=='gas':
-                if solvationmethod=='':
-                    reactantdir=os.path.join(orig_dir,f'{rn_0pad}',rt,solvorgas,functional,b2bf(basis))
-                    os.chdir(reactantdir)
-                    mkgauss_input_from_xyz(rn_0pad,react_lists[j][i],f'{rt}',functional=functional, basis=basis,solvorgas=solvorgas,solvmethod=solvationmethod,solvent=None)
-                else:
-                    print('Gas specified but an implicit solvation model was also specified. These are conflicting, please rectify this.')
-                    return
-            
-
-    os.chdir(orig_dir)
+        f.write(f'echo "============================================================"\n\n')
+        
+        f.write(f'export GAUSS_SCRDIR=/home/gridsan/groups/manthiram_lab/scratch/$SLURM_JOB_NAME-$SLURM_JOB_ID\n\n')
+        
+        f.write(f'export GAUSS_SCRDIR\n')
+        f.write(f'. $g16root/g16/bsd/g16.profile\n\n')
+                
+                
+        f.write(f'echo "GAUSS_SCRDIR : $GAUSS_SCRDIR"\n')
+        f.write(f'mkdir -p $GAUSS_SCRDIR\n')
+        f.write(f'chmod 750 $GAUSS_SCRDIR\n')
+        f.write(f'g16 $input\n\n')
+        
+        f.write(f'rm -rf $GAUSS_SCRDIR')
+        
+        f.write('\n')
+        f.close()
 
 
-if __name__=="__main__":
-    parser=argparse.ArgumentParser()
-    parser.add_argument('-i', type=str, required=True)
-    parser.add_argument('-o', type=str)
-    parser.add_argument('-f', type=str)
-    parser.add_argument('-b', type=str)
-    parser.add_argument('-g', type=str)
-    parser.add_argument('-s', type=str)
-    parser.add_argument('--info', type=str)
-    args = parser.parse_args()
-    main(args)
-    print("Done!")

@@ -5,7 +5,7 @@ import rdkit
 import pandas as pd
 import numpy as np
 import argparse
-from utils import b2bf
+from DFT_utils import b2bf
 
 #The goal of this script is to be able to make a .smi file and .xyz file for the
 #specified smiles scrints in a given spreadhseet
