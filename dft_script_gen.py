@@ -1,9 +1,8 @@
 import os
 from os import path
-import sys
 import rdkit
 from rdkit import Chem
-from DFT_utils import b2bf, bf2b
+from dft_utils import b2bf, bf2b
 
 ATOMIC_SYMBOLS = ['H', 'He','B','C', 'N', 'O', 'F', 'Si', 'P', 'S', 'Cl', 'Br', 'I','Ar']
 
@@ -44,14 +43,30 @@ def GetSpinMultiplicity(Mol, CheckMolProp = True):
 
 def gaussian(xyz_file,smiles,solvorgas='gas',solvmethod=None,solvent=None,functional='B3LYP',basis='6-31++G**',mem='180GB',mult=True,charge=True,pop_analysis=False,single_point=False,chk=False,n_proc_shared=48,file_extension='.com'):
     
-    """ Make a gaussian input script (usually a .com file) from an xyz file similar to the format produced by
-    open babel. Ideally takes the output of mk_xyz_from_smiles_string or mk_xyz_from_smi.
+    """ 
+    Make a gaussian input script (usually a .com file) from an xyz file similar to the format produced by
+    open babel. Takes a file in the output format of mk_xyz_from_smiles_string or mk_xyz_from_smi.
 
-    Arguments:
-    xyz_file (object): path to xyz file with coordinates. Do not include .xyz file extension
-
+    Params:
+    
+    xyz_file       : Path to xyz file with coordinates. Do not include .xyz file extension
+    solvorgas      : If 'gas' no solvation is included, if 'solv' then solvation will be included with method solvmethod
+    solvent        : The solvent to be included in the calculation
+    functional     : The functional to be used in the calculation if DFT is to be used
+    basis          : the basis set to be used in the DFT or QM calculation
+    mem            : The amount of memory to be used in the calculation
+    mult           : Multiplicity to be included in the file. Default is to be calculated with GetSpinMultiplicity(). 
+                     Other values can be specified for purposes such as population analysis and calulating cation or anion properties.
+    charge         : The charge of the molecule in the calculation. Default is to be calculated with RDkit. 
+                     Other values can be specified for purposes such as population analysis and calulating cation or anion properties.
+    pop_analysis   : Whether or not to perform population analysis.
+    single_point   : Whether or not to only perform single point calculation. If True, no geometry optimization is performed.
+    chk            : Whether or not to include a check point file in the calculation
+    n_proc_shared  : How many processors to be used by the gaussian calculation
+    file_extension : The file extension used to save the file.
 
     Returns:
+    
     gaussian input file containing functional, basis set, xyz coordinates, etc. of the same name as
     the xyz file
 
@@ -155,19 +170,28 @@ def gaussian(xyz_file,smiles,solvorgas='gas',solvmethod=None,solvent=None,functi
         
         
         
-def gauss_sub_script(path,partition='xeon-p8',job_name='name', time='5-0:00:00',num_cpus=48,mem_per_cpu=4000):
+def gen_gauss_sub_script(path,partition='xeon-p8', time='5-0:00:00',num_cpus=48,mem_per_cpu=4000,g16root='/home/gridsan/groups/manthiram_lab/gaussian',GAUSS_SCRDIR='/home/gridsan/groups/manthiram_lab/scratch/$SLURM_JOB_NAME-$SLURM_JOB_ID'):
     
     """
-    Makes a slurm submission script for a gaussian calculation file (.com file). 
-    Right now this is written for the MIT supercloud. Things that would have to be changed are
-    g16root
-    GAUSS_SCRDIR
+    Generates a slurm submission script for a gaussian calculation file (.com file). 
+    Right now this is written for the MIT supercloud.
+    
+    Params
+    
+    path        : path where submission script will be saved. Include the entire path along with the filename.
+                  Dont include the file extension, this is set to .sh by default. 
+    partition   : #SBATCH --partition , will depend on system being used. 
+    time        : #SBATCH --time , how  much time to allocate to the calculation before it is automatically canceled
+    num_cpus    : #SBATCH -c , how many cps to be allocated to the task.
+    mem_per_cpu : #SBATCH --mem-per-cpu , how much memory to use per CPU. Units of MBs.
+    g16root     : Directory where gaussian is sotred on the system. Folder should be named g16, dont include this in the path.
+    GAUSS_SCDIR : Scratch directory where temporary files will be written during the gaussian calculation.
+    
     
     
     Returns
-    ----------
     
-    .sh file that is able to execute a gaussian command for a given gaussian input script (usually a .com file)
+    .sh file that is able to execute a gaussian command for a given gaussian input script with the same name (usually a .com file)
     """
     
     short_filename=os.path.basename(os.path.normpath(path))
@@ -186,7 +210,7 @@ def gauss_sub_script(path,partition='xeon-p8',job_name='name', time='5-0:00:00',
         f.write(f"#SBATCH --mem-per-cpu={mem_per_cpu}\n")
         f.write(f"#SBATCH --exclusive\n\n")
         
-        f.write(f"export g16root=/home/gridsan/groups/manthiram_lab/gaussian\n\n")
+        f.write(f"export g16root={g16root}\n\n")
         f.write(f"export PATH=$g16root/g16/:$g16root/gv:$PATH\n\n")
         
         f.write(f"echo \"Gaussian PATH\"\n")
@@ -202,7 +226,7 @@ def gauss_sub_script(path,partition='xeon-p8',job_name='name', time='5-0:00:00',
 
         f.write(f'echo "============================================================"\n\n')
         
-        f.write(f'export GAUSS_SCRDIR=/home/gridsan/groups/manthiram_lab/scratch/$SLURM_JOB_NAME-$SLURM_JOB_ID\n\n')
+        f.write(f'export GAUSS_SCRDIR={GAUSS_SCRDIR}\n\n')
         
         f.write(f'export GAUSS_SCRDIR\n')
         f.write(f'. $g16root/g16/bsd/g16.profile\n\n')
