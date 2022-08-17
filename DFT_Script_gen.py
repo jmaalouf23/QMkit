@@ -1,6 +1,5 @@
 import os
 from os import path
-
 import sys
 import rdkit
 from rdkit import Chem
@@ -43,10 +42,9 @@ def GetSpinMultiplicity(Mol, CheckMolProp = True):
 
 
 
-#new name? Gaussian()
-def mkgauss_input_from_xyz(xyz_file,smiles,solvorgas='gas',solvmethod=None,solvent=None,functional='B3LYP',basis='6-31++G**',mem='180GB',mult=True,charge=True,pop_analysis=False,single_point=False,chk=False,n_proc_shared=48):
+def gaussian(xyz_file,smiles,solvorgas='gas',solvmethod=None,solvent=None,functional='B3LYP',basis='6-31++G**',mem='180GB',mult=True,charge=True,pop_analysis=False,single_point=False,chk=False,n_proc_shared=48,file_extension='.com'):
     
-    """ Make a gaussian input script (.com file) from an xyz file similar to the format produced by
+    """ Make a gaussian input script (usually a .com file) from an xyz file similar to the format produced by
     open babel. Ideally takes the output of mk_xyz_from_smiles_string or mk_xyz_from_smi.
 
     Arguments:
@@ -69,7 +67,7 @@ def mkgauss_input_from_xyz(xyz_file,smiles,solvorgas='gas',solvmethod=None,solve
     with open(writepath, mode) as f:
         xyz=f.readlines()
 
-    writepath = os.path.join(os.getcwd(),f'{xyz_file}.com')
+    writepath = os.path.join(os.getcwd(),f'{xyz_file}{file_extension}')
     
     mode = 'a' if os.path.exists(writepath) else 'w'
     mol=Chem.MolFromSmiles(smiles)
@@ -154,11 +152,14 @@ def mkgauss_input_from_xyz(xyz_file,smiles,solvorgas='gas',solvmethod=None,solve
         f.write('\n')  
         f.close()
 
-def mkgauss_submission_script(path,partition='xeon-p8',job_name='name', time='5-0:00:00',num_cpus=48,mem_per_cpu=4000):
+        
+        
+        
+def gauss_sub_script(path,partition='xeon-p8',job_name='name', time='5-0:00:00',num_cpus=48,mem_per_cpu=4000):
     
     """
-    Makes a slurm submission script. Right now this is written for the MIT supercloud. Things that would have to be changed are
-    
+    Makes a slurm submission script for a gaussian calculation file (.com file). 
+    Right now this is written for the MIT supercloud. Things that would have to be changed are
     g16root
     GAUSS_SCRDIR
     
