@@ -1,16 +1,16 @@
 import os
 from os import path
+
 import sys
-import getopt
 import rdkit
 from rdkit import Chem
-import subprocess
-import pandas as pd
-import argparse
 from DFT_utils import b2bf, bf2b
+
+ATOMIC_SYMBOLS = ['H', 'He','B','C', 'N', 'O', 'F', 'Si', 'P', 'S', 'Cl', 'Br', 'I','Ar']
 
 
 def GetSpinMultiplicity(Mol, CheckMolProp = True):
+    
     """Get spin multiplicity of a molecule. The spin multiplicity is either
     retrieved from 'SpinMultiplicity' molecule property or calculated from
     from the number of free radical electrons using Hund's rule of maximum
@@ -42,38 +42,51 @@ def GetSpinMultiplicity(Mol, CheckMolProp = True):
     return int(SpinMultiplicity)
 
 
-def mkgauss_input_from_xyz(rn,smiles,solvorgas='gas',solvmethod=None,solvent=None,functional='B3LYP',basis='6-31++G**',mem='180GB',mult=True,charge=True,pop_analysis=False,single_point=False,chk=False,n_proc_shared=48):
+
+#new name? Gaussian()
+def mkgauss_input_from_xyz(xyz_file,smiles,solvorgas='gas',solvmethod=None,solvent=None,functional='B3LYP',basis='6-31++G**',mem='180GB',mult=True,charge=True,pop_analysis=False,single_point=False,chk=False,n_proc_shared=48):
     
-    """ Make a gaussian input script from an xyz file similar to the format produced by
+    """ Make a gaussian input script (.com file) from an xyz file similar to the format produced by
     open babel. Ideally takes the output of mk_xyz_from_smiles_string or mk_xyz_from_smi.
 
     Arguments:
-    rn (object): path to output file including the filename. Do not include the extension, such as .com
+    xyz_file (object): path to xyz file with coordinates. Do not include .xyz file extension
 
 
     Returns:
-    gaussian input file containing functional, basis set, xyz coordinates, etc.
+    gaussian input file containing functional, basis set, xyz coordinates, etc. of the same name as
+    the xyz file
 
     """
     
-    writepath = os.path.join(os.getcwd(),f'{rn}.xyz')
-    short_filename=os.path.basename(os.path.normpath(rn))
+    external_basis=['Def2SVPD','Def2TZVPD']
+    
+    
+    writepath = os.path.join(os.getcwd(),f'{xyz_file}.xyz')
+    short_filename=os.path.basename(os.path.normpath(xyz_file))
     
     mode = 'r' if os.path.exists(writepath) else 'w'
     with open(writepath, mode) as f:
         xyz=f.readlines()
 
-    writepath = os.path.join(os.getcwd(),f'{rn}.com')
+    writepath = os.path.join(os.getcwd(),f'{xyz_file}.com')
     
     mode = 'a' if os.path.exists(writepath) else 'w'
     mol=Chem.MolFromSmiles(smiles)
+    mol_withHs=Chem.AddHs(Chem.MolFromSmiles(smiles))
+    #make list of atom lables
+    atoms=[]
+    for a in mol_withHs.GetAtoms():
+        atoms.append(a.GetSymbol())
+    atom_set=list(set(atoms))
+    
     
     if charge and isinstance(charge,bool):
         pc=Chem.rdmolops.GetFormalCharge(mol)
     else:
         pc=charge
+        
     #get multiplcity
-    
     if mult and isinstance(mult,bool):
         mult=GetSpinMultiplicity(mol)
         
@@ -85,8 +98,6 @@ def mkgauss_input_from_xyz(rn,smiles,solvorgas='gas',solvmethod=None,solvent=Non
             f.write(f"%chk={short_filename}.chk\n")
             
         f.write(f"%NProcShared={n_proc_shared}\n")
-        #f.write(f"#p {functional}/{bf2b(basis)} Opt=(calcall,noeigentest,maxcycles=120) Freq\n")
-        
         
         if single_point:
             sp=''
@@ -97,7 +108,11 @@ def mkgauss_input_from_xyz(rn,smiles,solvorgas='gas',solvmethod=None,solvent=Non
         else:
             p=''
             
-        f.write(f"#p {functional}/{bf2b(basis)} {p} {sp} Freq\n")
+        #Add logic for custom bais set
+        if basis in external_basis:
+            f.write(f"#p {functional}/Gen {p} {sp} Freq\n")
+        else:
+            f.write(f"#p {functional}/{bf2b(basis)} {p} {sp} Freq\n")
         
         if solvorgas=='solv':
             f.write(f"SCRF=({solvmethod},solvent={solvent})\n\n")
@@ -109,12 +124,50 @@ def mkgauss_input_from_xyz(rn,smiles,solvorgas='gas',solvmethod=None,solvent=Non
             if i>1:
                 f.write(line)
         f.write('\n')
+
+        
+        #Add custom basis set info
+        count=0
+        if basis in external_basis:
+            par_path=os.path.abspath(os.path.join(__file__, os.pardir))
+            path= os.path.join(par_path,'basis_sets',f'{basis}.gbs')
+            
+            
+            with open(path) as fp:
+                Lines = fp.readlines()
+                for line in Lines:
+                    if count > 11:
+                        curr_line_list=line.strip().split()
+                        if len(curr_line_list)>0:
+                            if curr_line_list[0] in ATOMIC_SYMBOLS and len(curr_line_list) <= 2:
+                                curr_atom=curr_line_list[0]
+                            if curr_atom in atom_set:
+                                f.write(f'{line.strip()} \n')
+                    count = count + 1
+        else:
+            f.write('\n')
+            
         if solvorgas=='solv':
+            f.write('\n')
             f.write('RADII=BONDI\n')
-        f.write('\n')
+            f.write('\n')
+        f.write('\n')  
         f.close()
 
 def mkgauss_submission_script(path,partition='xeon-p8',job_name='name', time='5-0:00:00',num_cpus=48,mem_per_cpu=4000):
+    
+    """
+    Makes a slurm submission script. Right now this is written for the MIT supercloud. Things that would have to be changed are
+    
+    g16root
+    GAUSS_SCRDIR
+    
+    
+    Returns
+    ----------
+    
+    .sh file that is able to execute a gaussian command for a given gaussian input script (usually a .com file)
+    """
     
     short_filename=os.path.basename(os.path.normpath(path))
     writepath = os.path.join(os.getcwd(),f'{path}.sh')
