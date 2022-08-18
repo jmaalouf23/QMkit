@@ -8,21 +8,24 @@ import rdkit
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
+from dft_utils import ConfToMol,no_to_symbol
+
 """
 Author: Joseph Maalouf
 
 Set of functions to 
 
+
 • generate 3D coordinates from smiles strings and write text files with those coordinates
+• manipulating 3D coordinates in the form of textfiles, lists, arrays, or rdkit mols/conformers
 • extract 3D coordinates from the output files of QM or DFT calculations
 
 """
 
-def mk_xyz_from_smiles_string(smiles: str ,filename: str,numConfs: int =1,conf_id=False,randomseed=0xf00d,return_mol=False,write_file=True):
+def get_xyz_from_smiles_string(smiles: str ,filename: str,numConfs: int =1,conf_id=False,randomseed=0xf00d,return_mol=False,write_file=True):
     
     """
-    Uses RDkit to create an xyz textfile from a smiles string. The output format of the xyz file is the same as what is made by open babel.
-    The textfile is a .xyz format containing MMFF optimized conformers.
+    Uses RDkit to create an xyz textfile with 3D molecular coordinates from a smiles string. The output format of the xyz file is the same as what is made by open babel. The textfile is a .xyz format containing MMFF optimized conformers.
     Params
     
     smiles      : smiles string
@@ -122,7 +125,7 @@ def get_xyz_from_mol(mol,conf_id: int =0,randomseed=0xf00d)-> np.ndarray:
     return (xyz)
 
 
-def write_xyz_from_xyz_arr(xyz: np.ndarray,filename: str ,include_total_atoms: bool =False) -> None:
+def get_xyz_from_xyz_arr(xyz: np.ndarray,filename: str ,include_total_atoms: bool =False) -> None:
     
     """Writes an XYZ text file from and xyz array of the same formate given by
     get_xyz_from_mol. The ouput format exactly matches the format given by open babel.
@@ -188,7 +191,60 @@ def combine_labels_and_xyz(labels : list, xyz : list) -> np.ndarray:
     return arr  
 
 
-def mk_smi_file(smiles: str , save_path: str) -> None: 
+def get_xyz_from_output(file):
+
+    
+    """
+    Makes an XYZ file from the final geometry of a gaussian calulcation obtained from the output file.
+    
+    Arguments:
+    Gaussian output text file from a geom and freq calculation
+    
+    """
+    
+    temp_data=cclib.io.ccread(file)
+    xyz=temp_data.atomcoords[-1,:,:]
+    atnos=temp_data.atomnos
+    atsymbs=[no_to_symbol(x) for x in atnos]
+    n,m=np.shape(xyz)
+    
+    filename=os.path.basename(os.path.normpath(file))
+    split_file=filename.split('.')
+    base_file=split_file[0]
+    
+    writepath = os.path.join(os.getcwd(),f'{base_file}_converged.xyz')
+    mode = 'a' if os.path.exists(writepath) else 'w'
+
+    with open(writepath, mode) as f:
+        f.truncate(0)
+        f.write(f'{len(atsymbs)}')
+        f.write('\n\n')
+        for i in range(n):
+            f.write(f'{atsymbs[i]}{xyz[i,0]:>17,.6f}{xyz[i,1]:>15,.6f}{xyz[i,2]:>15,.6f}\n')
+        f.close()
+
+def GetCoordsFromMolBlock(mb):
+    
+    
+    header_lines=4
+    
+    lines=mb.splitlines()
+    n=int(lines[3].split()[0])
+    end_line=header_lines+n
+    
+    xyz=np.zeros((n,4),dtype='object')
+    for i,line in enumerate(lines[header_lines:end_line]):
+        split_line=line.split()
+
+        xyz[i,0]=split_line[3]
+        xyz[i,1]=float(split_line[0])
+        xyz[i,2]=float(split_line[1])
+        xyz[i,3]=float(split_line[2])
+        
+    return xyz
+        
+        
+def make_smi_file(smiles: str , save_path: str) -> None: 
     
     """
     Given a smile, makes a file containing the smiles with extension .smi
@@ -206,52 +262,3 @@ def mk_smi_file(smiles: str , save_path: str) -> None:
         f.truncate(0)
         f.write(smiles)
         
-    
-def ConfToMol(mol, conf_id):
-    
-    """
-    Given an rdkit mol with set of conformers,
-    returns the confomer with confomer id conf_id as
-    a mol object (instead of conformer object).
-    
-    params
-    
-    mol :     rdkit mol object with conformers generated
-    conf_id: id number of confer of mol to be selected
-    
-    returns
-    
-    new_mol: selected conformer of mol returned as an rdkit
-             mol object 
-    """
-    
-    conf = mol.GetConformer(conf_id)
-    new_mol = Chem.Mol(mol)
-    new_mol.RemoveAllConformers()
-    new_mol.AddConformer(Chem.Conformer(conf))
-    return new_mol
-
-
-
-""" Depracated: Suggested not to use the following functions"""
-
-def mk_xyz_from_smi(rn,software='obabel'):
-    
-    """
-    Creates an XYZ file from a smiles string using open babel software. 
-    
-    """
-    
-    if software=='obabel':
-        command=f'obabel -ismi {rn}.smi -oxyz -O {rn}.xyz --gen3d'
-        pro=subprocess.Popen(command,shell=True) #Using shell=True is a security hazard. This should be updated in the future to avoid this.
-
-        try:
-            pro.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            pro.kill()
-    elif software=='rdkit':
-        
-        #rdkit versions are now implemented in other functions, see mk_xyz_from_smiles_string()
-        pass
-    
